@@ -142,6 +142,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(atomicExpr);
   REGISTER_MATCHER(atomicType);
   REGISTER_MATCHER(attr);
+  REGISTER_MATCHER(attributedStmt);
   REGISTER_MATCHER(autoType);
   REGISTER_MATCHER(autoreleasePoolStmt)
   REGISTER_MATCHER(binaryConditionalOperator);
@@ -396,6 +397,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isArrow);
   REGISTER_MATCHER(isAssignmentOperator);
   REGISTER_MATCHER(isAtPosition);
+  REGISTER_MATCHER(isAttr);
   REGISTER_MATCHER(isBaseInitializer);
   REGISTER_MATCHER(isBitField);
   REGISTER_MATCHER(isCatchAll);
