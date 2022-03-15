@@ -357,6 +357,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasSpecializedTemplate);
   REGISTER_MATCHER(hasStaticStorageDuration);
   REGISTER_MATCHER(hasStructuredBlock);
+  REGISTER_MATCHER(hasSubStmt);
   REGISTER_MATCHER(hasSyntacticForm);
   REGISTER_MATCHER(hasTargetDecl);
   REGISTER_MATCHER(hasTemplateArgument);
@@ -397,7 +398,6 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isArrow);
   REGISTER_MATCHER(isAssignmentOperator);
   REGISTER_MATCHER(isAtPosition);
-  REGISTER_MATCHER(isAttr);
   REGISTER_MATCHER(isBaseInitializer);
   REGISTER_MATCHER(isBitField);
   REGISTER_MATCHER(isCatchAll);
