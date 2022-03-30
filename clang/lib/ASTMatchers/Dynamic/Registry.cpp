@@ -321,6 +321,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasInit);
   REGISTER_MATCHER(hasInitializer);
   REGISTER_MATCHER(hasInitStatement);
+  REGISTER_MATCHER(hasKernelConfig);
   REGISTER_MATCHER(hasKeywordSelector);
   REGISTER_MATCHER(hasLHS);
   REGISTER_MATCHER(hasLocalQualifiers);
