@@ -1,3 +1,5 @@
+### Disclaimer: This is a partial copy of the llvm-project repository ONLY for the purposes of code review for clang-rewrite. If you want llvm and/or clang-rewrite for real, go [here](https://github.com/llvm/llvm-project) or [here](https://github.com/ajohnson-uoregon/llvm-project), do NOT use this repository.
+
 # The LLVM Compiler Infrastructure
 
 This directory and its sub-directories contain source code for LLVM,
