@@ -1,11 +1,3 @@
-//===--- NewCodeCallback.h - Callback to find and process replacers -------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 #ifndef CLANG_NEW_CODE_CALLBACK_H
 #define CLANG_NEW_CODE_CALLBACK_H
 
@@ -24,9 +16,11 @@
 
 using namespace clang;
 using namespace clang::ast_matchers;
-
 using namespace clang::tooling;
 using namespace llvm;
+
+namespace clang {
+namespace rewrite_tool {
 
 DeclarationMatcher insert_before_match =
   functionDecl(allOf(
@@ -99,24 +93,22 @@ public:
     // grab all matcher names, put in list
     std::vector<std::string> matcher_names;
     for (Attr* attr : func->attrs()) {
-      attr->printPretty(llvm::outs(), PrintingPolicy(context->getLangOpts()));
-      printf("\n");
       switch(attr->getKind()) {
         case attr::ReplaceCode:
           for (StringRef m : cast<ReplaceCodeAttr>(attr)->matchers()) {
-            llvm::outs() << m << "\n";
+            // llvm::outs() << m << "\n";
             matcher_names.push_back(m.str());
           }
           break;
         case attr::InsertCodeAfter:
           for (StringRef m : cast<InsertCodeAfterAttr>(attr)->matchers()) {
-            llvm::outs() << m << "\n";
+            // llvm::outs() << m << "\n";
             matcher_names.push_back(m.str());
           }
           break;
         case attr::InsertCodeBefore:
           for (StringRef m : cast<InsertCodeBeforeAttr>(attr)->matchers()) {
-            llvm::outs() << m << "\n";
+            // llvm::outs() << m << "\n";
             matcher_names.push_back(m.str());
           }
           break;
@@ -132,8 +124,8 @@ public:
       printf("ERROR: invalid body\n");
       return;
     }
-    printf("function body\n");
-    body->dump();
+    // printf("function body\n");
+    // body->dump();
 
     FullSourceLoc body_begin;
     FullSourceLoc body_end;
@@ -185,8 +177,13 @@ public:
     }
 
     // make action, put in vector of actions
+    // std::vector<DynTypedNode> nodes;
+    // for (Stmt* s : body->body()) {
+    //   nodes.push_back(DynTypedNode::create(*s));
+    // }
     CodeAction *act =
-        new CodeAction(kind, matcher_names, std::string(code), action_name, context->getLangOpts());
+        new CodeAction(std::string(code), action_name, kind, matcher_names,
+          fid, SourceRange(body_begin, body_end));
     all_actions.push_back(act);
 
     delete[] code;
@@ -218,5 +215,7 @@ public:
   }
 };
 
+}
+} //namespaces
 
-#endif
+#endif //CLANG_NEW_CODE_CALLBACK_H

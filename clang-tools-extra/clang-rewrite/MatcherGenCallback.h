@@ -1,11 +1,3 @@
-//===--- MatcherGenCallback.h - Callback to make AST matchers -------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 #ifndef CLANG_MATCHER_GEN_CALLBACK_H
 #define CLANG_MATCHER_GEN_CALLBACK_H
 
@@ -36,24 +28,14 @@
 using namespace clang;
 using namespace clang::ast_matchers;
 using namespace clang::ast_matchers::dynamic;
-
 using namespace clang::tooling;
 
 using ast_matchers::internal::Matcher;
 
-using MT = MatcherType;
+namespace clang {
+namespace rewrite_tool {
 
-DynTypedMatcher rettest =
-  returnStmt(
-    hasReturnValue(
-      ignoringParenImpCasts(
-        allOf(
-          hasType(asString("int")),
-          expr().bind("x")
-        )
-      )
-    )
-  );
+using MT = MatcherType;
 
 class BuildMatcherVisitor : public RecursiveASTVisitor<BuildMatcherVisitor> {
 public:
@@ -138,7 +120,8 @@ public:
 
     bool VisitCallExpr(CallExpr* call) {
       // short circuit to not double up, yay class inheritance
-      if (isa<CUDAKernelCallExpr>(call)) {
+      if (isa<CUDAKernelCallExpr>(call) ||
+          isa<CXXOperatorCallExpr>(call)) {
         return true;
       }
       FunctionDecl* callee = call->getDirectCallee();
@@ -216,9 +199,28 @@ public:
       return true;
     }
 
+    bool VisitCXXOperatorCallExpr(CXXOperatorCallExpr* call) {
+      FunctionDecl* callee = call->getDirectCallee();
+      if (callee != nullptr) {
+        // plus 1 for callee
+        add_node(MT::cxxOperatorCallExpr, "cxxOperatorCallExpr()", getNumChildren(call) +1);
+        add_node(MT::callee, "callee()", 1);
+        Node* fxn = add_node(MT::functionDecl, "functionDecl()", 0);
+        fxn->set_is_literal(true);
+        fxn->set_name(callee->getNameAsString());
+      }
+      else {
+        add_node(MT::callExpr, "cxxOperatorCallExpr()", getNumChildren(call));
+      }
+      return true;
+    }
+
     bool VisitDeclRefExpr(DeclRefExpr* ref) {
       ValueDecl* decl = ref->getDecl();
       std::string name = decl->getNameAsString();
+      std::string qualname = decl->getQualifiedNameAsString();
+      printf("name: %s\n", name.c_str());
+      printf("qual name %s\n", qualname.c_str());
 
       if (is_literal(ref)) {
         Node* declref = add_node(MT::declRefExpr, "declRefExpr()", getNumChildren(ref) +1);
@@ -242,7 +244,7 @@ public:
         if (is_template_param) {
           Node* declref = add_node(MT::declRefExpr, "declRefExpr()", getNumChildren(ref) +1);
           declref->set_ignore_casts(true);
-          declref->bind_to(name);
+          declref->bind_to(name + ";" + qualname);
 
           add_node(MT::hasType, "hasType()", 1);
           ty = ref->getType();
@@ -257,7 +259,7 @@ public:
         else {
           Node* declref = add_node(MT::declRefExpr, "declRefExpr()", getNumChildren(ref));
           declref->set_ignore_casts(true);
-          declref->bind_to(name);
+          declref->bind_to(name + ";" + qualname);
         }
       }
 
@@ -273,6 +275,7 @@ public:
 
     bool VisitVarDecl(VarDecl* decl) {
       std::string name = decl->getNameAsString();
+      std::string qualname = decl->getQualifiedNameAsString();
 
       // TODO: dunno if the number of children is always 1 but let's hope so for now
       if (is_literal(decl)) {
@@ -312,7 +315,7 @@ public:
               add_node(MT::ignoringParenImpCasts, "ignoringParenImpCasts()", 1);
             }
           }
-          d->bind_to(name);
+          d->bind_to(name + ";" + qualname);
         }
         else {
           Node* d = add_node(MT::varDecl, "varDecl()", 1);
@@ -324,7 +327,7 @@ public:
           }
           std::string type = decl->getType().getAsString();
           d->set_type(type);
-          d->bind_to(name);
+          d->bind_to(name + ";" + qualname);
         }
       }
       return true;
@@ -421,7 +424,7 @@ private:
     // dump_branch_points();
     // if the tree is empty
     if (root == nullptr) {
-      printf("adding root %s\n", code.c_str());
+      // printf("adding root %s\n", code.c_str());
       if (sm == MT::fakeNode) {
         printf("WARNING: root can't be a fake node\n");
       }
@@ -436,7 +439,7 @@ private:
     }
     // if this has multiple children, push it onto the branch stack
     if (children > 1) {
-      printf("node %s should have %d children\n", code.c_str(), children);
+      // printf("node %s should have %d children\n", code.c_str(), children);
       current->add_child(temp);
       current = temp;
       if (sm != MT::fakeNode) {
@@ -446,7 +449,7 @@ private:
     }
     // if it's a leaf, we've finished adding this child, decrement
     else if (children == 0) {
-      printf("node %s has no more children\n", code.c_str());
+      // printf("node %s has no more children\n", code.c_str());
       current->add_child(temp);
       current = temp;
       branch_points.back().second--;
@@ -465,7 +468,7 @@ private:
     }
     // children == 1; stick
     else {
-      printf("node %s should have 1 child\n", code.c_str());
+      // printf("node %s should have 1 child\n", code.c_str());
       current->add_child(temp);
       current = temp;
       if (sm != MT::fakeNode) {
@@ -534,8 +537,8 @@ public:
       printf("ERROR: invalid matcher definition\n");
       return;
     }
-    printf("full function\n");
-    func->dump();
+    // printf("full function\n");
+    // func->dump();
 
     FullSourceLoc begin = context->getFullLoc(func->getBeginLoc());
     FullSourceLoc end = context->getFullLoc(func->getEndLoc());
@@ -557,8 +560,8 @@ public:
       printf("ERROR: invalid body\n");
       return;
     }
-    printf("function body\n");
-    body->dump();
+    // printf("function body\n");
+    // body->dump();
 
     // std::vector<std::string> literals;
 
@@ -595,24 +598,6 @@ public:
     printf("ACTUAL MATCHER\n");
     VariantMatcher varmatcher = make_matcher(matcher, 0);
 
-    printf("TYPES???\n");
-    if (varmatcher.hasTypedMatcher<DynTypedMatcher>()) {
-      printf("dyntype okay!\n");
-    }
-    if (varmatcher.hasTypedMatcher<Expr>()) {
-      printf("expr okay!\n");
-    }
-    if (varmatcher.hasTypedMatcher<Decl>()) {
-      printf("Decl okay!\n");
-    }
-    if (varmatcher.hasTypedMatcher<Stmt>()) {
-      printf("stmt okay!\n");
-    }
-    if (varmatcher.hasTypedMatcher<CUDAKernelCallExpr>()) {
-      printf("cudaKernelCallExpr okay!\n");
-    }
-    printf("END TYPES???\n");
-
     llvm::Optional<DynTypedMatcher> dynmatcher = varmatcher.getSingleMatcher();
     if (dynmatcher) {
       MatcherWrapper<DynTypedMatcher>* m = new MatcherWrapper<DynTypedMatcher>(*dynmatcher, matcher_name,
@@ -627,4 +612,7 @@ public:
   }
 };
 
-#endif
+}
+} //namespaces
+
+#endif //CLANG_MATCHER_GEN_CALLBACK_H

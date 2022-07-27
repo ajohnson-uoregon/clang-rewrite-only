@@ -1,11 +1,3 @@
-//===--- ClangRewrite.cpp - Command-line tool to rewrite code -------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 // Declares clang::SyntaxOnlyAction.
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/CommonOptionsParser.h"
@@ -21,6 +13,7 @@
 #include "clang/Rewrite/Core/RewriteBuffer.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 
+#include "ClangRewriteUtils.h"
 #include "CodeAction.h"
 #include "RewriteCallback.h"
 #include "MatcherWrapper.h"
@@ -35,9 +28,9 @@
 
 using namespace clang;
 using namespace clang::ast_matchers;
-
 using namespace clang::tooling;
 using namespace llvm;
+using namespace clang::rewrite_tool;
 
 // Apply a custom category to all command-line options so that they are the
 // only ones displayed.
@@ -65,8 +58,8 @@ cl::opt<bool> norewrite_file("no-rewrite-file",
                              cl::cat(RewriteCategory));
 
 cl::opt<std::string>
-    inst_file("inst-file",
-              cl::desc("File with code changes to be made at matched points."),
+    inst_file("spec-file",
+              cl::desc("Specification file; file with code changes to be made at matched points."),
               cl::cat(RewriteCategory));
 
 // CommonOptionsParser declares HelpMessage with a description of the common
@@ -92,13 +85,27 @@ int main(int argc, const char **argv) {
     llvm::errs() << ExpectedParser.takeError();
     return 1;
   }
+
   CommonOptionsParser &OptionsParser = ExpectedParser.get();
-  ClangTool Tool(OptionsParser.getCompilations(),
-                 OptionsParser.getSourcePathList());
+  std::vector<std::string> sources = OptionsParser.getSourcePathList();
+  std::vector<std::string> all_files = sources;
+  if (!inst_file.empty()) {
+    spec_files.push_back(inst_file);
+  }
+  all_files.insert(all_files.end(), spec_files.begin(), spec_files.end());
+  Tool = new ClangTool(OptionsParser.getCompilations(),
+                 all_files);
 
   // for (std::string path : OptionsParser.getSourcePathList()) {
   //   printf("source path %s\n", path.c_str());
   // }
+
+  for (std::string file : sources) {
+    llvm::ErrorOr<const FileEntry*> entry = Tool->getFiles().getFile(file);
+    if (entry) {
+      source_file_entries.push_back(*entry);
+    }
+  }
 
   if (norewrite_file) {
     rewrite_file = false;
@@ -109,14 +116,14 @@ int main(int argc, const char **argv) {
   int retval;
   // TODO: multiple inst files
   if (!inst_file.empty()) {
-    ClangTool InstTool(OptionsParser.getCompilations(), {inst_file});
+    // Tool(OptionsParser.getCompilations(), {inst_file});
 
     MatchFinder literal_finder;
     FindLiteralsCallback literals_callback;
 
     literal_finder.addMatcher(literal_vector, &literals_callback);
 
-    retval = InstTool.run(newFrontendActionFactory(&literal_finder).get());
+    retval = Tool->run(newFrontendActionFactory(&literal_finder).get());
     if (retval) {
       printf("Problems with finding literals.\n");
       return retval;
@@ -133,7 +140,7 @@ int main(int argc, const char **argv) {
     inst_finder.addMatcher(replace_match, &replace_callback);
     inst_finder.addMatcher(matcher, &matcher_callback);
 
-    retval = InstTool.run(newFrontendActionFactory(&inst_finder).get());
+    retval = Tool->run(newFrontendActionFactory(&inst_finder).get());
     if (retval) {
       printf("Problems with creating matchers and tranformations.\n");
       return retval;
@@ -174,7 +181,7 @@ int main(int argc, const char **argv) {
     }
     i++;
   }
-  retval = Tool.run(newFrontendActionFactory(&Finder).get());
+  retval = Tool->run(newFrontendActionFactory(&Finder).get());
 
   for (MatcherWrapper<ast_matchers::internal::DynTypedMatcher> *m : user_matchers) {
     delete m;

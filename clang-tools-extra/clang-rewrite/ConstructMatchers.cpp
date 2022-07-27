@@ -1,11 +1,3 @@
-//===--- ConstructMatchers.cpp - Dynamically create AST matchers ----------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/ASTMatchers/ASTMatchersInternal.h"
 
@@ -20,6 +12,9 @@
 using namespace clang;
 using namespace clang::ast_matchers;
 using namespace clang::ast_matchers::dynamic;
+
+namespace clang {
+namespace rewrite_tool {
 
 using ast_matchers::internal::Matcher;
 
@@ -79,7 +74,7 @@ std::string VariantValue_asString(VariantValue val, bool dump_matcher) {
 
 // make matchers for non-bound nodes
 VariantMatcher constructMatcher(StringRef MatcherName, int tab,
-                                Diagnostics *Error = nullptr) {
+                                Diagnostics *Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -99,7 +94,7 @@ VariantMatcher constructMatcher(StringRef MatcherName, int tab,
 VariantMatcher constructMatcher(StringRef MatcherName,
                                 const VariantValue &Arg1,
                                 int tab,
-                                Diagnostics *Error = nullptr) {
+                                Diagnostics *Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -124,7 +119,7 @@ VariantMatcher constructMatcher(StringRef MatcherName,
                                 const VariantValue &Arg1,
                                 const VariantValue &Arg2,
                                 int tab,
-                                Diagnostics *Error = nullptr) {
+                                Diagnostics *Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -152,7 +147,7 @@ VariantMatcher constructMatcher(StringRef MatcherName,
 VariantMatcher constructMatcher(StringRef MatcherName,
                                 std::vector<VariantValue> args,
                                 int tab,
-                                Diagnostics* Error = nullptr) {
+                                Diagnostics* Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -180,7 +175,7 @@ VariantMatcher constructMatcher(StringRef MatcherName,
 VariantMatcher constructBoundMatcher(StringRef MatcherName,
                                      StringRef BoundName,
                                      int tab,
-                                     Diagnostics *Error = nullptr) {
+                                     Diagnostics *Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -201,7 +196,7 @@ VariantMatcher constructBoundMatcher(StringRef MatcherName,
                                      StringRef BoundName,
                                      const VariantValue &Arg1,
                                      int tab,
-                                     Diagnostics *Error = nullptr) {
+                                     Diagnostics *Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -227,7 +222,7 @@ VariantMatcher constructBoundMatcher(StringRef MatcherName,
                                      const VariantValue &Arg1,
                                      const VariantValue &Arg2,
                                      int tab,
-                                     Diagnostics *Error = nullptr) {
+                                     Diagnostics *Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -256,7 +251,7 @@ VariantMatcher constructBoundMatcher(StringRef MatcherName,
                                      StringRef BoundName,
                                      std::vector<VariantValue> args,
                                      int tab,
-                                     Diagnostics* Error = nullptr) {
+                                     Diagnostics* Error) {
   Diagnostics DummyError;
   if (!Error) {
     Error = &DummyError;
@@ -830,6 +825,9 @@ VariantMatcher make_matcher(Node* root, int level) {
     case MT::cudaKernelCallExpr:
       return handle_callExpr(root, "cudaKernelCallExpr", level);
       break;
+    case MT::cxxOperatorCallExpr:
+      return handle_callExpr(root, "cxxOperatorCallExpr", level);
+      break;
     // case MT::cxxDefaultArgExpr:
     //   return handle_non_bindable_node(root, "cxxDefaultArgExpr", level);
     //   break;
@@ -890,3 +888,6 @@ VariantMatcher make_matcher(Node* root, int level) {
       break;
   }
 }
+
+}
+} //namespaces

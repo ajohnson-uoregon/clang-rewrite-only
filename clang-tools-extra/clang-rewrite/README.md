@@ -209,4 +209,3 @@ Most of this tool functions via callbacks that run during AST traversal.
 
 An example of the syntax expected (still a work in progress) is in
 ``tests/new.cpp``.
-

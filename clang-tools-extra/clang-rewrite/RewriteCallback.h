@@ -1,13 +1,9 @@
-//===--- RewriteCallback.h - Callback to rewrite source -------------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 #ifndef CLANG_REWRITE_CALLBACK_H
 #define CLANG_REWRITE_CALLBACK_H
+
+#include "clang/Frontend/FrontendActions.h"
+#include "clang/Tooling/CommonOptionsParser.h"
+#include "clang/Tooling/Tooling.h"
 
 #include "clang/AST/ASTContext.h"
 // #include "clang/AST/DeclTemplate.h"
@@ -20,6 +16,7 @@
 
 #include "CodeAction.h"
 #include "MatcherWrapper.h"
+#include "ClangRewriteUtils.h"
 
 #include <algorithm>
 #include <fstream>
@@ -31,6 +28,9 @@ using namespace clang::ast_matchers;
 
 using namespace clang::tooling;
 using namespace llvm;
+
+namespace clang {
+namespace rewrite_tool {
 
 bool isLine(const Stmt *stmt) {
   if (isa<AsmStmt>(stmt) || isa<NullStmt>(stmt) || isa<ReturnStmt>(stmt) ||
@@ -99,6 +99,150 @@ bool isBlock(const Decl* decl) {
 // - TranslationUnitDecl
 // - TemplateParamObjectDecl
 
+class ReplaceBindingsCallback : public MatchFinder::MatchCallback {
+public:
+  ASTContext* context;
+  CodeAction* action;
+  Binding bind;
+
+  ReplaceBindingsCallback(CodeAction* action, Binding b) : action(action), bind(b) {}
+
+  ~ReplaceBindingsCallback() {}
+
+  void run(const MatchFinder::MatchResult &result) override {
+    // printf("RUNNING THE THING\n");
+    printf("found match for binding\n");
+    context = result.Context;
+
+    const Expr* expr = result.Nodes.getNodeAs<Expr>("match");
+    const NamedDecl* decl = result.Nodes.getNodeAs<NamedDecl>("match");
+
+    bool expr_valid = true;
+    bool decl_valid = true;
+
+    if (!expr ||
+        !context->getSourceManager().isInFileID(expr->getBeginLoc(), action->spec_file))
+         {
+      // printf("ERROR: invalid expr binding match loc\n");
+      expr_valid = false;
+    }
+
+    if (!decl ||
+        !context->getSourceManager().isInFileID(decl->getBeginLoc(), action->spec_file)) {
+      // printf("ERROR: invalid decl binding match loc\n");
+      decl_valid = false;
+    }
+
+    if (!expr_valid && !decl_valid) {
+      printf("ERROR: no valid binding match loc\n");
+      return;
+    }
+
+    SourceRange match_range;
+    if (expr_valid) {
+      match_range = SourceRange(expr->getBeginLoc(), expr->getEndLoc());
+    }
+    else if (decl_valid) {
+      match_range = SourceRange(decl->getBeginLoc(), decl->getEndLoc());
+    }
+
+    if (!action->snippet_range.fullyContains(match_range)) {
+      // printf("ERROR: match not in action's snippet\n");
+      return;
+    }
+
+
+    FullSourceLoc begin;
+    FullSourceLoc end;
+    FullSourceLoc match;
+
+    if (expr_valid) {
+      begin = context->getFullLoc(expr->getBeginLoc());
+      end = context->getFullLoc(expr->getEndLoc());
+      match = context->getFullLoc(expr->getBeginLoc());
+    }
+    else if (decl_valid) {
+      begin = context->getFullLoc(decl->getBeginLoc());
+      end = context->getFullLoc(decl->getEndLoc());
+      match = context->getFullLoc(decl->getLocation());
+    }
+
+    unsigned int begin_line = begin.getSpellingLineNumber();
+    unsigned int begin_col = begin.getSpellingColumnNumber();
+    unsigned int end_line = end.getSpellingLineNumber();
+    unsigned int end_col = end.getSpellingColumnNumber();
+
+    FileID fid = begin.getFileID();
+    unsigned int begin_offset = begin.getFileOffset();
+    unsigned int end_offset = end.getFileOffset();
+    unsigned int match_offset = match.getFileOffset();
+
+    printf("FOUND match for binding at %d:%d - %d:%d\n",
+           begin_line, begin_col, end_line, end_col);
+
+    llvm::Optional<llvm::MemoryBufferRef> buff =
+      context->getSourceManager().getBufferOrNone(fid);
+
+    char* code = new char[end_offset - begin_offset + 1];
+    if (buff.hasValue()) {
+      memcpy(code, &(buff->getBufferStart()[begin_offset]),
+             (end_offset - begin_offset + 1) * sizeof(char));
+      code[end_offset - begin_offset] = '\0';
+      printf("matched range: %s\n", code);
+      printf("               ");
+      for (unsigned int i = 0; i < match_offset - begin_offset; i++) {
+        printf(" ");
+      }
+      printf("^\n");
+    }
+    delete[] code;
+
+    Rewriter::RewriteOptions opts;
+    opts.IncludeInsertsAtBeginOfRange = false;
+    Rewriter rw(context->getSourceManager(), context->getLangOpts());
+
+    if (expr_valid) {
+      printf("expr\n");
+      expr->dump();
+    }
+    else if (decl_valid) {
+      printf("decl\n");
+      decl->dump();
+
+      char* name_c = new char[end_offset - match_offset + 1];
+      if (buff.hasValue()) {
+        memcpy(name_c, &(buff->getBufferStart()[match_offset]),
+               (end_offset - match_offset + 1) * sizeof(char));
+        name_c[end_offset - match_offset] = '\0';
+        StringRef name(name_c);
+        size_t space = name.find(" ");
+
+        rw.ReplaceText(decl->getLocation(), space, bind.value);
+      }
+      delete[] name_c;
+    }
+    std::string new_code = rw.getRewrittenText(action->snippet_range);
+
+    printf("new code!!!! %s\n", new_code.c_str());
+  }
+};
+
+class DumpCallback : public MatchFinder::MatchCallback {
+public:
+  void run(const MatchFinder::MatchResult &result) override {
+
+    const TranslationUnitDecl* tudecl = result.Nodes.getNodeAs<TranslationUnitDecl>("tudecl");
+
+    if (!tudecl) {
+      printf("ERROR: bad tudecl\n");
+      return;
+    }
+    else {
+      tudecl->dump();
+    }
+  }
+};
+
 template <class T>
 class RewriteCallback : public MatchFinder::MatchCallback {
 public:
@@ -110,7 +254,7 @@ public:
   static bool verbose;
   static bool rewrite_file;
 
-  std::map<std::string, std::string> bound_code;
+  std::vector<Binding> bound_code;
 
   RewriteCallback(MatcherWrapper<T> *matcher) : matcher(matcher) {}
 
@@ -160,13 +304,13 @@ public:
       const RewriteBuffer *buff = rw.getRewriteBufferFor(
           rw.getSourceMgr().getFileID(match->getBeginLoc()));
       if (buff) {
-        /*std::error_code erc;
+        std::error_code erc;
         std::string newfname =
             rw.getSourceMgr().getFilename(match->getBeginLoc()).str();
-        if (newfname.find(".") != std::string::npos) {
+        if (newfname.rfind(".") != std::string::npos) {
           std::string temp = ".test";
           temp.append(std::to_string(num_matched));
-          newfname.insert(newfname.find("."), temp);
+          newfname.insert(newfname.rfind("."), temp);
         } else {
           newfname.append(".test").append(std::to_string(num_matched));
         }
@@ -176,7 +320,7 @@ public:
         }
         raw_fd_ostream out(newfname, erc);
         buff->write(out);
-        out.close();*/
+        out.close();
         files_changed.push_back(
             rw.getSourceMgr().getFileID(match->getBeginLoc()));
         num_matched++;
@@ -196,17 +340,34 @@ public:
     const Decl *dmatch = result.Nodes.getNodeAs<Decl>("clang_rewrite_top_level_match");
     // const Type *tmatch = result.Nodes.getNodeAs<Type>
 
-    if ((!smatch || !context->getSourceManager().isInMainFile(
-                      smatch->getBeginLoc()))
-    && (!dmatch || !context->getSourceManager().isInMainFile(
-                      dmatch->getBeginLoc()))) {
+    if ((!smatch ||
+         !isInOneOfFileIDs(smatch->getBeginLoc(), source_file_entries,
+                           context->getSourceManager()))
+    && (!dmatch ||
+        !isInOneOfFileIDs(dmatch->getBeginLoc(), source_file_entries,
+                          context->getSourceManager()))) {
       // if (verbose) {
        // printf("no match or invalid type\n");
       // }
       return;
     }
 
-    for (auto n : result.Nodes.getMap()) {
+    // std::map<DynTypedNode, std::vector<std::string>> reverse_Nodes;
+    for (std::pair<std::string, DynTypedNode> n : result.Nodes.getMap()) {
+      // if not found, add it
+    //   auto search = reverse_Nodes.find(n.second);
+    //   if (search == reverse_Nodes.end()) {
+    //     reverse_Nodes.insert({n.second, {n.first}});
+    //   }
+    //   else {
+    //     search->second.push_back(n.first);
+    //   }
+    // }
+    //
+    // for (auto n : reverse_Nodes) {
+      // for (auto s : n.second) {
+      //   llvm::outs() << s << ",";
+      // }
       llvm::outs() << n.first << " : \n";
       n.second.dump(llvm::outs(), *context);
       const Stmt *stmt = result.Nodes.getNodeAs<Stmt>(n.first);
@@ -254,10 +415,21 @@ public:
           printf("no buffer :<\n");
         }
 
-        n.second.dump(llvm::outs(), *context);
+        // n.second.dump(llvm::outs(), *context);
         llvm::outs() << "\n";
+        Binding b;
+        // for (auto s : n.second) {
+        //   if (s != "clang_rewrite_top_level_match") {
+        //     b.names.push_back(s);
+        //   }
+        // }
+        // b.value = std::string(code);
         if (n.first != "clang_rewrite_top_level_match") {
-          bound_code[n.first] = std::string(code);
+          std::pair<StringRef, StringRef> split = StringRef(n.first).split(";");
+          b.name = split.first.str();
+          b.qual_name = split.second.str();
+          b.value = std::string(code);
+          bound_code.push_back(b);
         }
 
         delete[] code;
@@ -270,8 +442,21 @@ public:
 
         n.second.dump(llvm::outs(), *context);
         llvm::outs() << "\n";
+        Binding b;
+
+        // for (auto s : n.second) {
+        //   if (s != "clang_rewrite_top_level_match") {
+        //     b.names.push_back(s);
+        //   }
+        // }
+        // b.value = name;
+        // bound_code.push_back(b);
         if (n.first != "clang_rewrite_top_level_match") {
-          bound_code[n.first] = name;
+          std::pair<StringRef, StringRef> split = StringRef(n.first).split(";");
+          b.name = split.first.str();
+          b.qual_name = split.second.str();
+          b.value = name;
+          bound_code.push_back(b);
         }
       }
       else if (type) {
@@ -279,8 +464,20 @@ public:
         printf("type name: %s\n", name.c_str());
         n.second.dump(llvm::outs(), *context);
         llvm::outs() << "\n";
+        Binding b;
+        // for (auto s : n.second) {
+        //   if (s != "clang_rewrite_top_level_match") {
+        //     b.names.push_back(s);
+        //   }
+        // }
+        // b.value = name;
+        // bound_code.push_back(b);
         if (n.first != "clang_rewrite_top_level_match") {
-          bound_code[n.first] = name;
+          std::pair<StringRef, StringRef> split = StringRef(n.first).split(";");
+          b.name = split.first.str();
+          b.qual_name = split.second.str();
+          b.value = name;
+          bound_code.push_back(b);
         }
       }
       else {
@@ -290,7 +487,7 @@ public:
     }
 
     for (CodeAction *action : matcher->actions) {
-      action->replace_bound_code(bound_code);
+      replace_bound_code(action, bound_code);
     }
 
 
@@ -317,9 +514,9 @@ public:
       std::error_code erc;
       std::string newfname =
           rw.getSourceMgr().getFileEntryForID(f)->getName().str();
-      if (newfname.find(".") != std::string::npos) {
+      if (newfname.rfind(".") != std::string::npos) {
         std::string temp = ".test_final";
-        newfname.insert(newfname.find("."), temp);
+        newfname.insert(newfname.rfind("."), temp);
       } else {
         newfname.append(".test_final");
       }
@@ -333,6 +530,110 @@ public:
     }
 
     files_changed.clear();
+  }
+
+  void replace_bound_code(CodeAction* action, std::vector<Binding> bindings) {
+    printf("REPLACE BOUND CODE\n");
+
+    // ReplaceBindingsCallback cb(action);
+
+    for (Binding b: bindings) {
+      MatchFinder finder;
+      ReplaceBindingsCallback cb(action, b);
+      printf("LOOKING for things named %s or %s\n", b.name.c_str(), b.qual_name.c_str());
+
+      if (!b.name.empty() && !b.qual_name.empty()) {
+        VariantMatcher declmatcher =
+          constructBoundMatcher("namedDecl", "match",
+            constructMatcher("anyOf",
+              constructMatcher("hasName", StringRef(b.name), 2),
+              constructMatcher("hasName", StringRef(b.qual_name), 2),
+            1),
+          0);
+
+        llvm::Optional<DynTypedMatcher> dynmatcher = declmatcher.getSingleMatcher();
+        if (dynmatcher) {
+          finder.addDynamicMatcher(*dynmatcher, &cb);
+        }
+        else {
+          printf("ERROR: bad decl matcher\n");
+          return;
+        }
+
+        VariantMatcher refmatcher =
+          constructBoundMatcher("declRefExpr", "match",
+            constructMatcher("to",
+              constructMatcher("namedDecl",
+                constructMatcher("anyOf",
+                  constructMatcher("hasName", StringRef(b.name), 4),
+                  constructMatcher("hasName", StringRef(b.qual_name), 4),
+                3),
+              2),
+            1),
+          0);
+
+        dynmatcher = refmatcher.getSingleMatcher();
+        if (dynmatcher) {
+          finder.addDynamicMatcher(*dynmatcher, &cb);
+        }
+        else {
+          printf("ERROR: bad ref matcher\n");
+          return;
+        }
+      }
+
+      else if (!b.name.empty() || !b.qual_name.empty()) {
+        std::string valid_name = b.name.empty() ? b.qual_name : b.name;
+
+        VariantMatcher declmatcher =
+          constructBoundMatcher("namedDecl", "match",
+            constructMatcher("hasName",
+              StringRef(valid_name),
+            1),
+          0);
+
+        llvm::Optional<DynTypedMatcher> dynmatcher = declmatcher.getSingleMatcher();
+        if (dynmatcher) {
+          finder.addDynamicMatcher(*dynmatcher, &cb);
+        }
+        else {
+          printf("ERROR: bad qual decl matcher\n");
+          return;
+        }
+
+        VariantMatcher refmatcher =
+          constructBoundMatcher("declRefExpr", "match",
+            constructMatcher("to",
+              constructMatcher("namedDecl",
+                constructMatcher("hasName",
+                  StringRef(valid_name),
+                3),
+              2),
+            1),
+          0);
+
+        dynmatcher = refmatcher.getSingleMatcher();
+        if (dynmatcher) {
+          finder.addDynamicMatcher(*dynmatcher, &cb);
+        }
+        else {
+          printf("ERROR: bad qual ref matcher\n");
+          return;
+        }
+      }
+
+      else {
+        printf("ERROR: no valid name to look for\n");
+        return;
+      }
+
+      printf("RUNNING MATCH FINDER\n");
+      // finder.matchAST(*context);
+      int retval = Tool->run(newFrontendActionFactory(&finder).get());
+      if (retval) {
+        printf("OH NOES\n");
+      }
+    }
   }
 
 private:
@@ -586,34 +887,18 @@ private:
   }
 
   bool locValidForCodeInsertBefore(const MatchFinder::MatchResult &result) {
-    const Stmt *smatch = result.Nodes.getNodeAs<Stmt>("match");
-    const Stmt *sroot = result.Nodes.getNodeAs<Stmt>("root");
+    const Stmt *smatch = result.Nodes.getNodeAs<Stmt>("clang_rewrite_top_level_match");
 
-    const Decl *dmatch = result.Nodes.getNodeAs<Decl>("match");
-    const Decl *droot = result.Nodes.getNodeAs<Decl>("root");
+    const Decl *dmatch = result.Nodes.getNodeAs<Decl>("clang_rewrite_top_level_match");
 
     // sometimes the outermost part of the matcher *is* the match so we have no
     // root and need to make one
-    if (!sroot && !droot) {
-      if (smatch) {
-        sroot = smatch;
-      }
-      else if (dmatch) {
-        droot = dmatch;
-      }
-    }
 
-    if (smatch && sroot) {
-      return locValidForCodeInsertBeforeHelp(result, smatch, sroot);
+    if (smatch) {
+      return locValidForCodeInsertBeforeHelp(result, smatch, smatch);
     }
-    else if (smatch && droot) {
-      return locValidForCodeInsertBeforeHelp(result, smatch, droot);
-    }
-    else if (dmatch && sroot) {
-      return locValidForCodeInsertBeforeHelp(result, dmatch, sroot);
-    }
-    else if (dmatch && droot) {
-      return locValidForCodeInsertBeforeHelp(result, dmatch, droot);
+    else if (dmatch) {
+      return locValidForCodeInsertBeforeHelp(result, dmatch, dmatch);
     }
     else {
       printf("ERROR in locValidForCodeInsertBefore\n");
@@ -622,8 +907,8 @@ private:
   }
 
   bool locValidForCodeInsertAfter(const MatchFinder::MatchResult &result) {
-    const Stmt *smatch = result.Nodes.getNodeAs<Stmt>("match");
-    const Decl *dmatch = result.Nodes.getNodeAs<Decl>("match");
+    const Stmt *smatch = result.Nodes.getNodeAs<Stmt>("clang_rewrite_top_level_match");
+    const Decl *dmatch = result.Nodes.getNodeAs<Decl>("clang_rewrite_top_level_match");
     // check if will obviously be dead code (after return, break, continue)
     // anything more difficult left for future work/integration with unused code
     // pass
@@ -662,4 +947,7 @@ template <class T> int RewriteCallback<T>::num_matched = 0;
 template <class T> bool RewriteCallback<T>::verbose = false;
 template <class T> bool RewriteCallback<T>::rewrite_file = true;
 
-#endif
+}
+}// namespaces
+
+#endif //CLANG_REWRITE_CALLBACK_H

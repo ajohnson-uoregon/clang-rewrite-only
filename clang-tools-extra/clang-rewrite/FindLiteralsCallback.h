@@ -1,11 +1,3 @@
-//===--- FindLiteralsCallback.h - Callback to process literal names -------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-
 #ifndef CLANG_FIND_LITERALS_CALLBACK_H
 #define CLANG_FIND_LITERALS_CALLBACK_H
 
@@ -22,6 +14,9 @@
 
 #include <string>
 #include <vector>
+
+namespace clang {
+namespace rewrite_tool {
 
 
 std::vector<std::string> clang_rewrite_literals;
@@ -48,9 +43,9 @@ public:
     findStringChildren(lit->getInit(), clang_rewrite_literals);
 
     printf("found literals:\n");
-    //for (std::string s : clang_rewrite_literals) {
-      //printf("  %s\n", s.c_str());
-    //}
+    for (std::string s : clang_rewrite_literals) {
+      printf("  %s\n", s.c_str());
+    }
   }
 
   // void findStringChildren(const VarDecl *decl, std::vector<std::string> &strings) {
@@ -75,5 +70,8 @@ public:
     }
   }
 };
+
+}
+} //namespaces
 
 #endif // CLANG_FIND_LITERALS_CALLBACK_H
